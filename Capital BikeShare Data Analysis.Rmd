@@ -1,0 +1,181 @@
+---
+title: "Capital BikeShare Data Analysis"
+author: "Srujana Dandem"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Capital BikeShare is a bicyle-sharing system in Washington, D.C. At any of about 700 stations, a registered user can unlock and check out a bicycle. After use, the bike can be returned to the same station or any of the other stations.
+
+Such sharing systems require careful management. There need to be enough bikes at each station to satisfy the demand, and enough empty docks at the destination station so that the bikes can be returned. At each station, bikes are checked out and are returned over the course of the day. An imbalance between bikes checked out and bikes returned calls for the system administration to truck bikes from one station to another. This is expensive.
+
+In order to manage the system, and to support a smart-phone app so that users can find out when bikes are available, Capital BikeShare collects real-time data on when and where each bike is checked out or returned, and how many bikes and empty docks there are at each station. Capital BikeShare publishes the station-level information in real time. The organization also publishes, at the end of each quarter of the year, the historical record of each bike rental in that time.
+
+You can access the data from the Capital BikeShare web site. For this project, however,already translated and cleaned data are provided in the given two data tables:
+Stations giving information about location of each of the stations in the system.
+Trips gives the rental history over 2021.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(mosaic)
+library(lubridate)
+
+Stations <- read_csv("https://mcsp.wartburg.edu/letsche/cs205/DC-Stations.csv")
+data_site <- "https://mcsp.wartburg.edu/letsche/cs205/2021-Trips-Data-Small.rds"
+Trips <- readRDS(gzcon(url(data_site)))
+Stations <- Stations %>% select(name,lat,long)
+Trips %>% select(sstation, estation, client, sdate, edate)
+```
+**How long?**
+Question 1: Make a box-and-whisker plot, showing the distribution of the duration of rental events, broken down by the client type. The duration of the rental can be calculated as as.numeric( edate – sdate ). The units will be in either hours, minutes, or seconds. It should not be much trouble for you to figure out which one.
+
+When you make your plot, you will likely find that the axis range is being set by a few outliers. These may be bikes that were lost or forgotten. Arrange your scale to ignore these outliers.
+
+```{r}
+Trips <- Trips %>% mutate(rentaltime = as.numeric(edate - sdate) / 60)
+Trips %>% ggplot(aes(x=client, y = rentaltime, fill=client)) + geom_boxplot(outlier.alpha = .1) + ylim(0,100) + xlab("Client Type") + ylab("Rental Time (Minutes)")
+```
+
+**When are bikes used?**
+The sdate variable in Trips indicates the date and time of day that the bicycle was checked out of the parking station.
+
+Often, you will want discrete components of a date.
+
+Question 2: Make histograms or density plots of each of these discrete components. Explain what each plot is showing about how bikes are checked out. 
+
+The graphic shows a lot of variation of bike use over the course of the day. Now consider two additional variables: the day of the week and the “client” type.
+
+A: Day of the year:
+- From this graph, we can determine that the bikes are used the most during the middle of the year. This is likely influenced by the good weather during those months.
+
+```{r}
+Trips$day <- yday(Trips$sdate) 
+Trips %>% ggplot(aes(x=day)) + geom_density(fill="grey", alpha=.5) + xlab("D")
+```
+
+Day of the Week: 
+- Through this graph, we are able to determine that the bikes are used at a consistent level during the weekdays, whereas the usage increases on Day 1 and 7.
+```{r}
+Trips$dayWeek <- wday(Trips$sdate)
+Trips %>% ggplot(aes(x=dayWeek)) + geom_density(fill="grey", alpha=.5) + 
+xlab("D")
+```
+
+Hour of the Day: 
+- We find that there is a peak in the number of bikes checked out around 5pm.
+
+```{r}
+Trips$hour <- hour(Trips$sdate)
+Trips %>% ggplot(aes(x=hour)) + geom_density(fill="grey", alpha=.5) + xlab("H")
+```
+
+Minute in the Hour: 
+- We find that the bike usage is mostly consistent, with a slight peak at the middle.
+```{r}
+Trips$min <- minute(Trips$sdate)
+Trips %>% ggplot(aes(x=min)) + geom_density(fill="grey", alpha=.5) + xlab("M")
+```
+
+Question 3: Group the bike rentals by three variables: hour of the day, day of the week, and client type. Find the total number of events in each grouping and plot this count versus hour. Use the group aesthetic to represent one of the other variables and faceting to represent the other.
+
+Question 4: Make the same sort of display of how bike rentals vary by hour, day of the week, and client type, but use geom_density() rather than grouping and counting. Compare the two displays – one of discrete counts and one of density – and describe any major differences.
+
+```{r}
+TripsGraph <- Trips %>% group_by(hour, dayWeek, client) %>% summarise(count=n())
+TripsGraph %>% ggplot(aes(y=count, x=hour, color=client)) + geom_line(aes(group=client)) + 
+  facet_wrap(vars(dayWeek))
+```
+
+The major differences seen are:
+- Days 2-6 seem to follow a similar pattern in shape when comparing the discrete count and density plots. Day 1 and 7 though, are characterized by a peak in the middle of the day, most likely since they are the weekends, indicating the difference in density plots. We also notice that the discrete count is greater than the density at the peaks for these two days.
+
+```{r}
+Trips %>% ggplot(aes(x=hour, color=client)) + geom_density(aes(group=client)) + 
+  facet_wrap(vars(dayWeek))
+```
+
+**How far?**
+Question 5: There are 677 cases in the Stations data table. How many cases will there be in a full outer join of Simple to Simple2?
+
+It’s often impractical to carry out a full outer join. For example, joining BabyNames to itself with a full outer join will generate a result with more than four trillion cases. Perform the full outer join and then use haversine() to compute the distance between each pair of stations.
+
+Check your result for sensibility. Make a histogram of the station-to-station distances and explain where it looks like what you would expect.
+
+A: - There would be 456976 cases.
+-  From the graph, we can determine that most of the bike stations are positioned relatively close to each other, when compared to the entire distance of D.C. Most are within the range of 4 and 14km. 
+```{r}
+source("https://mcsp.wartburg.edu/letsche/cs205/haversine.R")
+Simple <-
+  Stations %>%
+  rename(sstation = name)
+Simple2 <- 
+  Simple %>%
+  rename(estation = sstation, lat2=lat, long2=long)
+
+merge(head(Simple, 4), head(Simple2, 3), by=NULL)
+
+nrow(Simple) * nrow(Simple2)
+
+StationPairs <- merge(Simple, Simple2, by=NULL)
+PairDistances <- 
+  StationPairs %>% 
+  mutate(distance=haversine(lat, long, lat2, long2)) %>%
+  select(sstation, estation, distance)
+PairDistances %>% ggplot(aes(x=distance)) + geom_histogram()
+```
+
+Question 6: Look at the variables in Stations and Trips and explain why Simple and Simple2 were given different variable names for the station.
+
+A: - Simple and Simple2 were given different variable names in order to merge them with Trips table. We renamed the station column to sstation and estation, as well as the long and lat to be able to easily recognize the right station.
+
+```{r}
+Trips <- Trips %>% 
+  inner_join(PairDistances, by=c("sstation"="sstation", "estation"="estation"))
+
+```
+
+Question 7: Display the distribution of the ride distances of the rides. Compare it to the distances between pairs of stations. Are they similar? Why or why not?
+
+A: - We find that they aren't similar since the trip distance is larger than the station distances. There is a very high number of trips that are of a low distance. This is most likely because upon completion of their trip, the customers come back close to their origin station in order to return their bicycles.
+
+```{r}
+ggplot() + geom_density(aes(x=Trips$distance)) + 
+  geom_density(aes(x= PairDistances$distance), fill="grey", alpha=.5) +
+  xlab("Trip Distance (km)")
+```
+
+**Long-distance stations**
+
+Question 8 (more challenging): Around each station on the map, draw a circle whose radius reflects the median distance covered by rentals starting at that station. To draw the circles, use the same leaflet commands as before, but add in a line like this: 
+
+addCircles( radius = ~ mid, color = "blue", opacity = .0001)
+
+For addCircles() to draw circles at the right scale, the units of median distance should be presented in meters rather than kilometers. This will create too much overlap, unfortunately. So, set the radius to be half or one-third the median distance in meters. From your map, explain the pattern you see in the relationship between station location and median distance. Given the amount of data in the full table,
+this may take your computer a long time. If this is a problem, perform this operation on the smaller data.
+
+A: - Through this map, we can see that in central DC, the median circles are much larger and closely clustered. This is because, due to there being more activities to partake in central DC, customers would cover larger distances and would return the bikes at different stations as well. When we look at the size of circles closer to the outskirts though, they are much smaller. This is because the customers are more likely to return to the same station to return the bikes, since they wouldn't be travelling very far and there are lesser things to do.
+
+```{r}
+library(leaflet)
+stationMap <-
+  leaflet(Stations) %>%
+  addTiles() %>%
+  addCircleMarkers(radius=2, color="red") %>%
+  setView(-77.04, 38.9, zoom = 12)
+stationMap
+
+TripMedians <- 
+  Trips %>% 
+  group_by(sstation) %>% 
+  summarize(mid = 1000/3 * median(distance)) 
+Stations <- Stations %>% inner_join(TripMedians, by=c("name"="sstation"))
+stationMap <-
+  leaflet(Stations) %>%
+  addTiles() %>%
+  addCircleMarkers(radius=2, color="red") %>%
+  addCircles(radius= ~mid, color="blue", opacity=.0001) %>%
+  setView(-77.04, 38.9, zoom = 12)
+stationMap
+```
